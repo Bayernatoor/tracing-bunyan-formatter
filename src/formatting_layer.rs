@@ -75,13 +75,15 @@ impl<W: for<'a> MakeWriter<'a> + 'static> BunyanFormattingLayer<W> {
     /// You have to specify:
     /// - a `name`, which will be attached to all formatted records according to the [Bunyan format](https://github.com/trentm/node-bunyan#log-record-fields);
     /// - a `make_writer`, which will be used to get a `Write` instance to write formatted records to.
+    /// - a `hostname`, if `hostname` feature not enabled it must be set to `Some(value)`. Otherwise set to None to use `gethostname` or provide a `Some(value)`.
+    ///
     ///
     /// ## Using stdout
     ///
     /// ```rust
     /// use tracing_bunyan_formatter::BunyanFormattingLayer;
     ///
-    /// let formatting_layer = BunyanFormattingLayer::new("tracing_example".into(), std::io::stdout);
+    /// let formatting_layer = BunyanFormattingLayer::new("tracing_example".into(), std::io::stdout, None);
     /// ```
     ///
     /// If you prefer, you can use closure syntax:
@@ -89,10 +91,33 @@ impl<W: for<'a> MakeWriter<'a> + 'static> BunyanFormattingLayer<W> {
     /// ```rust
     /// use tracing_bunyan_formatter::BunyanFormattingLayer;
     ///
-    /// let formatting_layer = BunyanFormattingLayer::new("tracing_example".into(), || std::io::stdout());
+    /// let formatting_layer = BunyanFormattingLayer::new("tracing_example".into(), || std::io::stdout(), None);
     /// ```
-    pub fn new(name: String, make_writer: W) -> Self {
-        Self::with_default_fields(name, make_writer, HashMap::new())
+    ///
+    /// ## Building on WASM
+    ///
+    /// ```rust
+    /// use tracing_bunyan_formatter::BunyanFormattingLayer;
+    ///
+    /// let formatting_layer = BunyanFormattingLayer::new("tracing_example".into(), std::io::stdout(), Some("hostname".into()));
+    /// ```
+    ///
+    #[allow(unused_variables)]
+    pub fn new(name: String, make_writer: W, hostname: Option<String>) -> Self {
+
+        #[cfg(not(feature = "hostname"))]
+        let host_name = match hostname {
+            Some(host) => host.to_string(),
+            _ => panic!("You must provide a value for the default field `HOSTNAME` when the `hostname` feature is not enabled."),
+        };
+
+        #[cfg(feature = "hostname")]
+        let host_name = match hostname {
+            Some(host) => host.to_string(),
+            _ => String::new(), 
+        };
+
+        Self::with_default_fields(name, make_writer, HashMap::new(), host_name)
     }
 
     /// Add default fields to all formatted records.
@@ -110,20 +135,30 @@ impl<W: for<'a> MakeWriter<'a> + 'static> BunyanFormattingLayer<W> {
     ///     default_fields,
     /// );
     /// ```
+    #[allow(unused_variables)]
     pub fn with_default_fields(
         name: String,
         make_writer: W,
         default_fields: HashMap<String, Value>,
+        host_name: String,
     ) -> Self {
+
+        #[cfg(feature = "hostname")] 
+        let host_name = {
+            let hostname = gethostname::gethostname().to_string_lossy().into_owned();
+            hostname
+        };
+
         Self {
             make_writer,
             name,
             pid: std::process::id(),
-            hostname: gethostname::gethostname().to_string_lossy().into_owned(),
+            hostname: host_name,
             bunyan_version: 0,
             default_fields,
             skip_fields: HashSet::new(),
         }
+        
     }
 
     /// Add fields to skip when formatting with this layer.
